@@ -15,8 +15,10 @@
 # ------------------------------------------------------------------------------
 
 import asyncio
+import json
 from typing import Annotated
 
+import aiofiles
 import websockets.exceptions
 from fastapi import APIRouter, Security
 from fastapi.requests import Request
@@ -26,7 +28,7 @@ from fastapi.websockets import WebSocketDisconnect, WebSocket
 from pyasic_web import settings
 from pyasic_web.auth import AUTH_SCHEME
 from pyasic_web.auth.users import User, get_current_user
-from pyasic_web.func.miners import get_current_miner_list
+from pyasic_web.func.miners import get_current_miner_list, update_miner_list
 
 from pyasic_web.func.scan import do_websocket_scan
 from pyasic_web.func.users import get_user_ip_range
@@ -54,9 +56,7 @@ async def miner_scan_page(
 @router.post("/add")
 async def miner_scan_add_page(request: Request):
     miners = await request.json()
-    with open(settings.MINER_LIST, "a+") as file:
-        for miner_ip in miners["miners"]:
-            file.write(miner_ip + "\n")
+    await update_miner_list(miners["miners"])
     return RedirectResponse(request.url_for("dashboard_page"), status_code=303)
 
 

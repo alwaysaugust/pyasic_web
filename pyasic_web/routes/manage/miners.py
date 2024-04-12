@@ -18,6 +18,7 @@ import asyncio
 import json
 from typing import Annotated
 
+import aiofiles
 import websockets.exceptions
 from fastapi import APIRouter, Security
 from fastapi.requests import Request
@@ -29,7 +30,12 @@ from pyasic_web import settings
 from pyasic_web.api.data import data_manager
 from pyasic_web.auth import AUTH_SCHEME
 from pyasic_web.auth.users import User, get_current_user
-from pyasic_web.func.miners import get_current_miner_list
+from pyasic_web.func.miners import (
+    get_current_miner_list,
+    update_miner_list,
+    get_miner_phases,
+    update_miner_phases,
+)
 from pyasic_web.func.users import get_user_ip_range
 
 from pyasic_web.templates import templates
@@ -59,6 +65,8 @@ async def manage_miners_ws(
 ):
     await websocket.accept()
     miners = await get_current_miner_list(await get_user_ip_range(current_user))
+    miner_phases = await get_miner_phases()
+    miner_phases = {k: v for k, v in miner_phases.items() if k in miners}
     try:
         async for data in data_manager.subscribe():
             for miner in miners:
@@ -73,6 +81,7 @@ async def manage_miners_ws(
                             ),
                             "errors": data[miner].get("errors", []),
                             "fault_light": data[miner].get("fault_light", False),
+                            "phase": miner_phases[miner],
                         }
                     )
     except WebSocketDisconnect:
@@ -108,6 +117,16 @@ async def manage_miners_reboot_page(request: Request):
     return RedirectResponse(request.url_for("manage_miners_page"), status_code=303)
 
 
+@router.post("/phase")
+async def manage_miners_phase_page(request: Request):
+    miners_phase = (await request.json())["miners"]
+    phase_set = int((await request.json())["phase"])
+    if not miners_phase:
+        return RedirectResponse(request.url_for("manage_miners_page"), status_code=303)
+    await update_miner_phases(miners_phase, phase_set)
+    return RedirectResponse(request.url_for("manage_miners_page"), status_code=303)
+
+
 @router.post("/restart_backend")
 async def manage_miners_restart_backend_page(request: Request):
     miners_restart = (await request.json())["miners"]
@@ -126,14 +145,11 @@ async def manage_miners_remove_page(request: Request):
     miners = await get_current_miner_list("*")
     for miner_ip in miners_remove:
         miners.remove(miner_ip)
-    with open(settings.MINER_LIST, "w") as file:
-        for miner_ip in miners:
-            file.write(miner_ip + "\n")
+    await update_miner_list(miners)
     return RedirectResponse(request.url_for("manage_miners_page"), status_code=303)
 
 
 @router.post("/remove_all", dependencies=[Security(AUTH_SCHEME, scopes=["admin"])])
 async def manage_miners_remove_all_page(request: Request):
-    file = open(settings.MINER_LIST, "w")
-    file.close()
+    await update_miner_list([])
     return RedirectResponse(request.url_for("dashboard_page"), status_code=303)
